@@ -39,7 +39,7 @@ CREATE [EXTERNAL] TABLE [IF NOT EXISTS] [database.]table_name
 
 :::
 
-### **column_definition**
+### column_definition
 
 语法：
 
@@ -51,7 +51,7 @@ col_name col_type [agg_type] [NULL | NOT NULL] [DEFAULT "default_value"] [AUTO_I
 
 **col_name**：列名称。
 
-注意，在一般情况下，不能直接创建以以 `__op` 或 `__row` 开头命名的列，因为此类列名被 StarRocks 保留用于特殊目的，创建这样的列可能导致未知行为。如需创建这样的列，必须将 FE 动态参数 [`allow_system_reserved_names`](../../../administration/FE_configuration.md#allow_system_reserved_names) 设置为 `TRUE`。
+注意，在一般情况下，不能直接创建以以 `__op` 或 `__row` 开头命名的列，因为此类列名被 StarRocks 保留用于特殊目的，创建这样的列可能导致未知行为。如需创建这样的列，必须将 FE 动态参数 [`allow_system_reserved_names`](../../../administration/management/FE_configuration.md#allow_system_reserved_names) 设置为 `TRUE`。
 
 **col_type**：列数据类型
 
@@ -103,13 +103,13 @@ col_name col_type [agg_type] [NULL | NOT NULL] [DEFAULT "default_value"] [AUTO_I
 
 - HLL (1~16385个字节)
 
-  HLL 列类型，不需要指定长度和默认值，长度根据数据的聚合程度系统内控制，并且 HLL 列只能通过配套的 [hll_union_agg](../../sql-functions/aggregate-functions/hll_union_agg.md)、[Hll_cardinality](../../sql-functions/scalar-functions/hll_cardinality.md)、[hll_hash](../../sql-functions/aggregate-functions/hll_hash.md)进行查询或使用。
+  HLL 列类型，不需要指定长度和默认值，长度根据数据的聚合程度系统内控制，并且 HLL 列只能通过配套的 [hll_union_agg](../../sql-functions/aggregate-functions/hll_union_agg.md)、[hll_cardinality](../../sql-functions/scalar-functions/hll_cardinality.md)、[hll_hash](../../sql-functions/scalar-functions/hll_hash.md)进行查询或使用。
 
 - BITMAP
   BITMAP 列类型，不需要指定长度和默认值。表示整型的集合，元素个数最大支持到 2^64 - 1。
 
 - ARRAY
-  支持在一个数组中嵌套子数组，最多可嵌套 14 层。您必须使用尖括号（ < 和 > ）来声明 ARRAY 的元素类型，如 ARRAY < INT >。目前不支持将数组中的元素声明为 [Fast Decimal](../data-types/DECIMAL.md) 类型。
+  支持在一个数组中嵌套子数组，最多可嵌套 14 层。您必须使用尖括号（ < 和 > ）来声明 ARRAY 的元素类型，如 ARRAY < INT >。目前不支持将数组中的元素声明为 [Fast Decimal](../../data-types/numeric/DECIMAL.md) 类型。
 
 **agg_type**：聚合类型，如果不指定，则该列为 key 列。否则，该列为 value 列。
 
@@ -129,7 +129,7 @@ col_name col_type [agg_type] [NULL | NOT NULL] [DEFAULT "default_value"] [AUTO_I
 
 1. BITMAP_UNION 聚合类型列在导入时的原始数据类型必须是 `TINYINT, SMALLINT, INT, BIGINT`。
 2. 如果在建表时 `REPLACE_IF_NOT_NULL` 列指定了 NOT NULL，那么 StarRocks 仍然会将其转化 NULL，不会向用户报错。用户可以借助这个类型完成「部分列导入」的功能。
-  该类型只对聚合表有用 (`key_desc` 的 `type` 为 `AGGREGATE KEY`)。
+  该类型只对聚合表有用 (`key_desc` 的 `type` 为 `AGGREGATE KEY`)。自 3.1.9 起，`REPLACE_IF_NOT_NULL` 新增支持 BITMAP 类型的列。
 
 **NULL | NOT NULL**：列数据是否允许为 `NULL`。其中明细表、聚合表和更新表中所有列都默认指定 `NULL`。主键表的指标列默认指定 `NULL`，维度列默认指定 `NOT NULL`。如源数据文件中存在 `NULL` 值，可以用 `\N` 来表示，导入时 StarRocks 会将其解析为 `NULL`。
 
@@ -143,7 +143,7 @@ col_name col_type [agg_type] [NULL | NOT NULL] [DEFAULT "default_value"] [AUTO_I
 
 **AS generation_expr**：指定生成列和其使用的表达式。[生成列](../generated_columns.md)用于预先计算并存储表达式的结果，可以加速包含复杂表达式的查询。自 v3.1，StarRocks 支持该功能。
 
-### **index_definition**
+### index_definition
 
 创建 bitmap 索引的语法如下。有关参数说明和使用限制，请参见 [Bitmap 索引](../../../table_design/indexes/Bitmap_index.md#创建索引)。
 
@@ -151,7 +151,7 @@ col_name col_type [agg_type] [NULL | NOT NULL] [DEFAULT "default_value"] [AUTO_I
 INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
 ```
 
-### **ENGINE 类型**
+### ENGINE 类型
 
 默认为 `olap`，表示创建的是 StarRocks 内部表。
 
@@ -161,7 +161,7 @@ INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
 
 **从 3.1 版本起，支持直接在 Iceberg catalog 内创建表（当前仅支持 Parquet 格式的表），您可以通过 [INSERT INTO](../data-manipulation/INSERT.md) 把数据插入到 Iceberg 表中。参见 [创建 Iceberg 表](../../../data_source/catalog/iceberg_catalog.md#创建-iceberg-表)。**
 
-**从 3.2 版本起，支持直接在 Hive catalog 内创建表（当前仅支持 Parquet 格式的表），您可以通过 [INSERT INTO](../data-manipulation/INSERT.md) 把数据插入到 Hive 表中。参见 [创建 Hive 表](../../../data_source/catalog/hive_catalog.md#创建-hive-表)。**
+**从 3.2 版本起，支持直接在 Hive Catalog 内创建 Parquet 格式的表，并支持通过 [INSERT INTO](../data-manipulation/INSERT.md) 把数据插入到 Parquet 格式的 Hive 表中。从 3.3 版本起，支持直接在 Hive Catalog 中创建 ORC 及 Textfile 格式的表，并支持通过 [INSERT INTO](../data-manipulation/INSERT.md) 把数据插入到 ORC 及 Textfile 格式的 Hive 表中。参见[创建 Hive 表](../../../data_source/catalog/hive_catalog.md#创建-hive-表)和[向 Hive 表中插入数据](../../../data_source/catalog/hive_catalog.md#向-hive-表中插入数据)。**
 
 1. 如果是 mysql，则需要在 properties 提供以下信息：
 
@@ -243,7 +243,7 @@ INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
 
     其中 `resource` 是 Hudi 资源的名称。`database` 是 Hudi 表所属的数据库名称。`table` Hudi 表名称。
 
-### **key_desc**
+### key_desc
 
 语法：
 
@@ -270,7 +270,7 @@ INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
 
 如果后续想修改表的注释，可以使用 `ALTER TABLE <table_name> COMMENT = "new table comment"`（3.1 版本开始支持）。
 
-### **partition_desc**
+### partition_desc
 
 支持三种分区方式，[表达式分区](../../../table_design/expression_partitioning.md)（推荐）、[Range 分区](../../../table_design/Data_distribution.md#range-分区) 和 [List 分区](../../../table_design/list_partitioning.md)。
 
@@ -300,7 +300,7 @@ INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
     使用指定的 key 列和指定的数值范围进行分区。
 
     - 分区名称的命名要求，参见[系统限制](../../../reference/System_limit.md)。
-    - 仅支持以下类型的列作为 Range 分区列：`TINYINT, SMALLINT, INT, BIGINT, LARGEINT, DATE, DATETIME`。
+    - 3.3.0 之前，仅支持以下类型的列作为 Range 分区列：`TINYINT, SMALLINT, INT, BIGINT, LARGEINT, DATE, DATETIME`。自 3.3.0 起，支持三个特定时间函数为 Range 分区列。具体使用方式，参见[数据分布](../../../table_design/Data_distribution.md#手动创建分区)。
     - 分区为左闭右开区间，首个分区的左边界为最小值。
     - NULL 值只会存放在包含 **最小值** 的分区中。当包含最小值的分区被删除后，NULL 值将无法导入。
     - 可以指定一列或多列作为分区列。如果分区值缺省，则会默认填充最小值。
@@ -399,6 +399,7 @@ INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
             PARTITION p202102 VALUES [("20210201"), ("20210301")),
             PARTITION p202103 VALUES [("20210301"), (MAXVALUE))
         )
+        ```
 
 - **批量创建分区**
 
@@ -423,7 +424,7 @@ INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
     说明：
     用户可以通过给出一个 START 值、一个 END 值以及一个定义分区增量值的 EVERY 子句批量产生分区。
 
-    - 当前分区列仅支持日期类型和整数类型。
+    - 3.3.0 之前，仅支持以下类型的列作为 Range 分区列：`TINYINT, SMALLINT, INT, BIGINT, LARGEINT, DATE, DATETIME`。自 3.3.0 起，支持三个特定时间函数为 Range 分区列。具体使用方式，参见[数据分布](../../../table_design/Data_distribution.md#手动创建分区)。
     - 当分区列为日期类型时，需要指定 `INTERVAL` 关键字来表示日期间隔。目前日期间隔支持 hour (v3.0）、day、week、month、year，分区的命名规则同动态分区一样。
     - 当分区列为整数类型时，START 值、END 值仍需要用双引号包裹。
     - 仅支持指定一列作为分区列。
@@ -448,7 +449,7 @@ INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
         )
         ```
 
-### **distribution_desc**
+### distribution_desc
 
 支持随机分桶（Random bucketing）和哈希分桶（Hash bucketing）。如果不指定分桶信息，则 StarRocks 默认使用随机分桶且自动设置分桶数量。
 
@@ -495,15 +496,13 @@ INDEX index_name (col_name[, col_name, ...]) [USING BITMAP] [COMMENT '']
   - 分桶键指定后不支持修改。
   - 自 2.5.7 版本起，建表时**无需手动指定分桶数量**，StarRocks 自动设置分桶数量。如果您需要手动设置分桶数量，请参见[设置分桶数量](../../../table_design/Data_distribution.md#设置分桶数量)。
 
-### **ORDER BY**
+### ORDER BY
 
-自 3.0 版本起，主键表解耦了主键和排序键，排序键通过 `ORDER BY` 指定，可以为任意列的排列组合。
+自 3.0 版本起，主键表支持使用 `ORDER BY` 定义排序键，自 3.3 版本起，明细表、聚合表和更新表支持使用 `ORDER BY` 定义排序键。
 
-> **注意**
->
-> 如果指定了排序键，就根据排序键构建前缀索引；如果没指定排序键，就根据主键构建前缀索引。
+排序键的更多说明，请参见[排序键和前缀索引](../../../table_design/indexes/Prefix_index_sort_key.md)。
 
-### **PROPERTIES**
+### PROPERTIES
 
 #### 设置数据的初始存储介质、自动降冷时间和副本数
 
@@ -691,7 +690,7 @@ ROLLUP (rollup_name (column_name1, column_name2, ...)
 
 #### 为 View Delta Join 查询改写定义 Unique Key 和外键约束
 
-要在 View Delta Join 场景中启用查询重写，您必须为 Delta Join 中的表定义 Unique Key 约束 `foreign_key_constraints` 和外键约束 `foreign_key_constraints`。详细信息，请参阅 [异步物化视图 - 基于 View Delta Join 场景改写查询](../../../using_starrocks/query_rewrite_with_materialized_views.md#view-delta-join-改写)。
+要在 View Delta Join 场景中启用查询重写，您必须为 Delta Join 中的表定义 Unique Key 约束 `unique_constraints` 和外键约束 `foreign_key_constraints`。详细信息，请参阅 [异步物化视图 - 基于 View Delta Join 场景改写查询](../../../using_starrocks/query_rewrite_with_materialized_views.md#view-delta-join-改写)。
 
 ```SQL
 PROPERTIES (
@@ -721,7 +720,7 @@ PROPERTIES (
 
 #### 为 StarRocks 存算分离集群创建云原生表
 
-为了[使用 StarRocks 存算分离集群](../../../deployment/shared_data/s3.md)，您需要通过以下 PROPERTIES 创建云原生表：
+为了[使用 StarRocks 存算分离集群](../../../deployment/shared_data/shared_data.mdx)，您需要通过以下 PROPERTIES 创建云原生表：
 
 ```SQL
 PROPERTIES (
@@ -741,7 +740,7 @@ PROPERTIES (
 
   > **说明**
   >
-  > 如需启用本地磁盘缓存，必须在 BE 配置项 `storage_root_path` 中指定磁盘目录。更多信息，请参见 [BE 配置项](../../../administration/BE_configuration.md)。
+  > 如需启用本地磁盘缓存，必须在 BE 配置项 `storage_root_path` 中指定磁盘目录。更多信息，请参见 [BE 配置项](../../../administration/management/BE_configuration.md)。
 
 - `datacache.partition_duration`：热数据的有效期。当启用本地磁盘缓存时，所有数据都会导入至本地磁盘缓存中。当缓存满时，StarRocks 会从缓存中删除最近较少使用（Less recently used）的数据。当有查询需要扫描已删除的数据时，StarRocks 会检查该数据是否在有效期内。如果数据在有效期内，StarRocks 会再次将数据导入至缓存中。如果数据不在有效期内，StarRocks 不会将其导入至缓存中。该属性为字符串，您可以使用以下单位指定：`YEAR`、`MONTH`、`DAY` 和 `HOUR`，例如，`7 DAY` 和 `12 HOUR`。如果不指定，StarRocks 将所有数据都作为热数据进行缓存。
 
@@ -756,12 +755,12 @@ PROPERTIES (
 
 #### 设置 fast schema evolution
 
-`fast_schema_evolution`: 是否开启该表的 fast schema evolution，取值：`TRUE` 或 `FALSE`（默认）。开启后增删列时可以提高 schema change 速度并降低资源使用。目前仅支持在建表时开启该属性，建表后不支持通过 [ALTER TABLE](../data-definition/ALTER_TABLE.md) 修改该属性。自 3.2.0 版本起，支持该参数。
+`fast_schema_evolution`: 是否开启该表的 fast schema evolution，取值：`TRUE` 或 `FALSE`（默认）。开启后增删列时可以提高 schema change 速度并降低资源使用。目前仅支持在建表时开启该属性，建表后不支持通过 [ALTER TABLE](../data-definition/ALTER_TABLE.md) 修改该属性。
 
 > **NOTE**
 >
-> - StarRocks 存算分离集群不支持该参数。
-> - 如果您需要在集群范围内设置该配置，例如集群范围内关闭 fast schema evolution，则可以设置 FE 动态参数 [`enable_fast_schema_evolution`](../../../administration/FE_configuration.md#enable_fast_schema_evolution)。
+> - StarRocks 存算一体集群自 v3.2.0 版本起支持该参数，存算分离集群自 v3.3.0 起支持该参数。
+> - 如果您需要在集群范围内设置该配置，例如集群范围内关闭 fast schema evolution，则可以设置 FE 动态参数 [`enable_fast_schema_evolution`](../../../administration/management/FE_configuration.md#enable_fast_schema_evolution)。
 
 ## 示例
 

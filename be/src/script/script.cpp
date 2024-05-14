@@ -217,6 +217,7 @@ void bind_exec_env(ForeignModule& m) {
         REG_METHOD(GlobalEnv, schema_change_mem_tracker);
         REG_METHOD(GlobalEnv, column_pool_mem_tracker);
         REG_METHOD(GlobalEnv, page_cache_mem_tracker);
+        REG_METHOD(GlobalEnv, jit_cache_mem_tracker);
         REG_METHOD(GlobalEnv, update_mem_tracker);
         REG_METHOD(GlobalEnv, chunk_allocator_mem_tracker);
         REG_METHOD(GlobalEnv, clone_mem_tracker);
@@ -478,6 +479,7 @@ public:
             REG_VAR(EditVersionInfo, creation_time);
             REG_VAR(EditVersionInfo, rowsets);
             REG_VAR(EditVersionInfo, deltas);
+            REG_VAR(EditVersionInfo, gtid);
             REG_METHOD(EditVersionInfo, get_compaction);
         }
         {

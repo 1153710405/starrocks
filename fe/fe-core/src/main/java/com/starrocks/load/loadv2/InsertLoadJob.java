@@ -46,11 +46,11 @@ import com.starrocks.catalog.Table;
 import com.starrocks.catalog.system.SystemTable;
 import com.starrocks.common.Config;
 import com.starrocks.common.MetaNotFoundException;
-import com.starrocks.common.NotImplementedException;
 import com.starrocks.common.UserException;
 import com.starrocks.load.EtlJobType;
 import com.starrocks.load.FailMsg;
 import com.starrocks.load.FailMsg.CancelType;
+import com.starrocks.qe.scheduler.Coordinator;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.thrift.TLoadJobType;
 import com.starrocks.thrift.TReportExecStatusParams;
@@ -75,8 +75,9 @@ public class InsertLoadJob extends LoadJob {
 
     @SerializedName("tid")
     private long tableId;
-    private long estimateScanRow;
+    private long estimateScanRow = 0;
     private TLoadJobType loadType;
+    private Coordinator coordinator;
 
     // only for log replay
     public InsertLoadJob() {
@@ -84,23 +85,22 @@ public class InsertLoadJob extends LoadJob {
         this.jobType = EtlJobType.INSERT;
     }
 
-    public InsertLoadJob(String label, long dbId, long tableId, long createTimestamp,
-                         long estimateScanRow, TLoadJobType type, long timeout)
-            throws MetaNotFoundException {
+    public InsertLoadJob(String label, long dbId, long tableId, long createTimestamp, TLoadJobType type, long timeout,
+            Coordinator coordinator) throws MetaNotFoundException {
         super(dbId, label);
         this.tableId = tableId;
         this.createTimestamp = createTimestamp;
         this.loadStartTimestamp = createTimestamp;
         this.state = JobState.LOADING;
         this.jobType = EtlJobType.INSERT;
-        this.estimateScanRow = estimateScanRow;
         this.loadType = type;
         this.timeoutSecond = timeout;
+        this.coordinator = coordinator;
     }
 
     // only used for test
     public InsertLoadJob(String label, long dbId, long tableId, long createTimestamp, String failMsg,
-                         String trackingUrl) throws MetaNotFoundException {
+                         String trackingUrl, Coordinator coordinator) throws MetaNotFoundException {
         super(dbId, label);
         this.tableId = tableId;
         this.createTimestamp = createTimestamp;
@@ -119,6 +119,7 @@ public class InsertLoadJob extends LoadJob {
         this.authorizationInfo = gatherAuthInfo();
         this.loadingStatus.setTrackingUrl(trackingUrl);
         this.loadType = TLoadJobType.INSERT_QUERY;
+        this.coordinator = coordinator;
     }
 
     public void setLoadFinishOrCancel(String failMsg, String trackingUrl) throws UserException {
@@ -135,6 +136,7 @@ public class InsertLoadJob extends LoadJob {
             }
             this.authorizationInfo = gatherAuthInfo();
             this.loadingStatus.setTrackingUrl(trackingUrl);
+            this.coordinator = null;
         } finally {
             writeUnlock();
         }
@@ -159,13 +161,20 @@ public class InsertLoadJob extends LoadJob {
             super.updateProgress(params);
             if (!loadingStatus.getLoadStatistic().getLoadFinish()) {
                 if (this.loadType == TLoadJobType.INSERT_QUERY) {
-                    progress = (int) ((double) loadingStatus.getLoadStatistic().totalSourceLoadRows() 
-                        / (estimateScanRow + 1) * 100);
+                    if (loadingStatus.getLoadStatistic().totalFileSizeB != 0) {
+                        // progress of file scan
+                        progress = (int) ((double) loadingStatus.getLoadStatistic().sourceScanBytes() /
+                                loadingStatus.getLoadStatistic().totalFileSize() * 100);
+                    } else {
+                        // progress of table scan. Slightly smaller than actual
+                        progress = (int) ((double) loadingStatus.getLoadStatistic().totalSourceLoadRows()
+                                / (estimateScanRow + 1) * 100);
+                    }
                 } else {
                     progress = (int) ((double) loadingStatus.getLoadStatistic().totalSinkLoadRows() 
                         / (estimateScanRow + 1) * 100);
                 }
-                
+
                 if (progress >= 100) {
                     progress = 99;
                 }
@@ -231,12 +240,12 @@ public class InsertLoadJob extends LoadJob {
 
     @Override
     protected List<TabletCommitInfo> getTabletCommitInfos() {
-        throw new RuntimeException(new NotImplementedException("Not implemented"));
+        return Coordinator.getCommitInfos(coordinator);
     }
 
     @Override
     protected List<TabletFailInfo> getTabletFailInfos() {
-        throw new RuntimeException(new NotImplementedException("Not implemented"));
+        return Coordinator.getFailInfos(coordinator);
     }
 
     @Override
@@ -248,5 +257,9 @@ public class InsertLoadJob extends LoadJob {
     public void readFields(DataInput in) throws IOException {
         super.readFields(in);
         tableId = in.readLong();
+    }
+
+    public void setEstimateScanRow(long rows) {
+        this.estimateScanRow = rows;
     }
 }

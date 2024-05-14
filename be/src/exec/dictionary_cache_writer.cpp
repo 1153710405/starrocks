@@ -55,7 +55,8 @@ Status DictionaryCacheWriter::prepare() {
     return Status::OK();
 }
 
-Status DictionaryCacheWriter::append_chunk(ChunkPtr chunk, std::atomic_bool* terminate_flag /*finish or cancel*/) {
+Status DictionaryCacheWriter::append_chunk(const ChunkPtr& chunk,
+                                           std::atomic_bool* terminate_flag /*finish or cancel*/) {
     if (chunk != nullptr) {
         if (chunk->num_rows() == 0) {
             return Status::OK();
@@ -64,6 +65,10 @@ Status DictionaryCacheWriter::append_chunk(ChunkPtr chunk, std::atomic_bool* ter
         RETURN_IF_ERROR(DictionaryCacheWriter::ChunkUtil::check_chunk_has_null(*chunk.get()));
 
         if (_buffer_chunk == nullptr) {
+            chunk->reset_slot_id_to_index();
+            for (size_t i = 0; i < chunk->num_columns(); i++) {
+                chunk->set_slot_id_to_index(i + 1, i);
+            }
             _buffer_chunk = chunk->clone_empty_with_slot();
         }
         DCHECK(_buffer_chunk != nullptr);
@@ -286,7 +291,7 @@ Status DictionaryCacheWriter::ChunkUtil::uncompress_and_deserialize_chunk(const 
                                                                           faststring* uncompressed_buffer,
                                                                           const OlapTableSchemaParam* schema) {
     // build chunk meta
-    auto row_desc = std::make_unique<RowDescriptor>(schema->tuple_desc(), false);
+    auto row_desc = std::make_unique<RowDescriptor>(schema->tuple_desc());
     StatusOr<serde::ProtobufChunkMeta> res = serde::build_protobuf_chunk_meta(*row_desc, pchunk);
     if (!res.ok()) {
         return res.status();

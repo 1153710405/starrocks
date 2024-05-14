@@ -106,23 +106,51 @@ You can still choose to tolerate a certain level of data inconsistency by settin
 
 Please note that if you need to refresh by partition, the partitioning keys of the materialized view must be included in that of the base table.
 
+From v3.2.3, StarRocks supports creating partitioned materialized views upon Iceberg tables with [Partition Transforms](https://iceberg.apache.org/spec/#partition-transforms), and the materialized views are partitioned by the column after the transformation. Currently, only Iceberg tables with the `identity`, `year`, `month`, `day`, or `hour` transforms are supported.
+
+The following example shows the definition of an Iceberg table with the `day` partition transform and creates a materialized view with aligned partitions upon it:
+
+```SQL
+-- Iceberg table definition.
+CREATE TABLE spark_catalog.test.iceberg_sample_datetime_day (
+  id         BIGINT,
+  data       STRING,
+  category   STRING,
+  ts         TIMESTAMP)
+USING iceberg
+PARTITIONED BY (days(ts))
+
+-- Create a materialized view upon the Iceberg table.
+CREATE MATERIALIZED VIEW `test_iceberg_datetime_day_mv` (`id`, `data`, `category`, `ts`)
+PARTITION BY (`ts`)
+DISTRIBUTED BY HASH(`id`)
+REFRESH MANUAL
+AS 
+SELECT 
+  `iceberg_sample_datetime_day`.`id`, 
+  `iceberg_sample_datetime_day`.`data`, 
+  `iceberg_sample_datetime_day`.`category`, 
+  `iceberg_sample_datetime_day`.`ts`
+FROM `iceberg`.`test`.`iceberg_sample_datetime_day`;
+```
+
 For Hive catalogs, you can enable the Hive metadata cache refresh feature to allow StarRocks to detect data changes at the partition level. When this feature is enabled, StarRocks periodically accesses the Hive Metastore Service (HMS) or AWS Glue to check the metadata information of recently queried hot data.
 
 To enable the Hive metadata cache refresh feature, you can set the following FE dynamic configuration item using [ADMIN SET FRONTEND CONFIG](../sql-reference/sql-statements/Administration/ADMIN_SET_CONFIG.md):
 
 ### Configuration items
 
-####  enable_background_refresh_connector_metadata                 
+#### enable_background_refresh_connector_metadata
 
 **Default**: true in v3.0 false in v2.5<br/>
 **Description**: Whether to enable the periodic Hive metadata cache refresh. After it is enabled, StarRocks polls the metastore (Hive Metastore or AWS Glue) of your Hive cluster, and refreshes the cached metadata of the frequently accessed Hive catalogs to perceive data changes. True indicates to enable the Hive metadata cache refresh, and false indicates to disable it.<br/>
 
-####  background_refresh_metadata_interval_millis                  
+#### background_refresh_metadata_interval_millis
 
 **Default**: 600000 (10 minutes)<br/>
 **Description**: The interval between two consecutive Hive metadata cache refreshes. Unit: millisecond.<br/>
 
-#### background_refresh_metadata_time_secs_since_last_access_secs 
+#### background_refresh_metadata_time_secs_since_last_access_secs
 
 **Default**: 86400 (24 hours)<br/>
 **Description**: The expiration time of a Hive metadata cache refresh task. For the Hive catalog that has been accessed, if it has not been accessed for more than the specified time, StarRocks stops refreshing its cached metadata. For the Hive catalog that has not been accessed, StarRocks will not refresh its cached metadata. Unit: second.
@@ -152,7 +180,7 @@ In scenarios involving query rewriting, if you use a very complex query statemen
 
 ## Best practices
 
-In real-world business scenarios, you can identify queries with high execution latency and resource consumption by analyzing audit logs or [big query logs](../administration/monitor_manage_big_queries.md#analyze-big-query-logs). You can further use [query profiles](../administration/query_profile.md) to pinpoint the specific stages where the query is slow. The following sections provide instructions and examples on how to boost data lake query performance with materialized views.
+In real-world business scenarios, you can identify queries with high execution latency and resource consumption by analyzing audit logs or [big query logs](../administration/management/monitor_manage_big_queries.md#analyze-big-query-logs). You can further use [query profiles](../administration/query_profile_overview.md) to pinpoint the specific stages where the query is slow. The following sections provide instructions and examples on how to boost data lake query performance with materialized views.
 
 ### Case One: Accelerate join calculation in data lake
 

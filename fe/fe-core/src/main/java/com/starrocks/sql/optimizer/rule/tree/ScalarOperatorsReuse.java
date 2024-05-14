@@ -15,6 +15,7 @@
 package com.starrocks.sql.optimizer.rule.tree;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -42,9 +43,9 @@ import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperatorVisitor;
 import com.starrocks.sql.optimizer.operator.scalar.SubfieldOperator;
 import com.starrocks.sql.optimizer.rewrite.scalar.NormalizePredicateRule;
+import com.starrocks.sql.optimizer.rewrite.scalar.ReduceCastRule;
 import com.starrocks.sql.optimizer.rewrite.scalar.ScalarOperatorRewriteRule;
 
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -314,7 +315,7 @@ public class ScalarOperatorsReuse {
             Set<ScalarOperator> operators = getOperatorsByDepth(depth, operatorsByDepth);
             isLambdaDependent = false;
             lambdaArguments.clear();
-            if (!isNonDeterministicFuncOrLambdaDependent(operator) && operators.contains(operator)) {
+            if (!isLambdaDependent(operator) && operators.contains(operator)) {
                 Set<ScalarOperator> commonOperators = getOperatorsByDepth(depth, commonOperatorsByDepth);
                 commonOperators.add(operator);
             }
@@ -333,7 +334,7 @@ public class ScalarOperatorsReuse {
 
         @Override
         public Integer visit(ScalarOperator scalarOperator, Void context) {
-            if (scalarOperator.getChildren().isEmpty()) {
+            if (scalarOperator.isConstant() || scalarOperator.getChildren().isEmpty()) {
                 return 0;
             }
 
@@ -349,16 +350,32 @@ public class ScalarOperatorsReuse {
         }
 
         @Override
+        public Integer visitCall(CallOperator scalarOperator, Void context) {
+            CallOperator callOperator = scalarOperator.cast();
+            if (FunctionSet.nonDeterministicFunctions.contains(callOperator.getFnName())) {
+                // try to reuse non deterministic function
+                // for example:
+                // select (rnd + 1) as rnd1, (rnd + 2) as rnd2 from (select rand() as rnd) sub
+                return collectCommonOperatorsByDepth(1, scalarOperator);
+            } else if (scalarOperator.isConstant() || scalarOperator.getChildren().isEmpty()) {
+                // to keep the same logic as origin
+                return 0;
+            } else {
+                return collectCommonOperatorsByDepth(scalarOperator.getChildren().stream().map(argument ->
+                        argument.accept(this, context)).reduce(Math::max).map(m -> m + 1).orElse(1), scalarOperator);
+            }
+        }
+
+        @Override
         public Integer visitDictMappingOperator(DictMappingOperator scalarOperator, Void context) {
             return collectCommonOperatorsByDepth(1, scalarOperator);
         }
 
-        // If a scalarOperator contains any non-deterministic function, it cannot be reused
-        // because the non-deterministic function results returned each time are inconsistent.
+
         // a lambda-dependent expressions also can't be reused if reuseLambdaDependentExpr is false.
         // For example, array_map(x->2x+1+2x,array),2x is lambda-dependent, so it can't be reused if
         // reuseLambdaDependentExpr is false, but array_map(x->2x+1+2x,array) can be reused if needed.
-        private boolean isNonDeterministicFuncOrLambdaDependent(ScalarOperator scalarOperator) {
+        private boolean isLambdaDependent(ScalarOperator scalarOperator) {
 
             if (hasLambdaFunction && !reuseLambdaDependentExpr) {
                 if (scalarOperator instanceof LambdaFunctionOperator) {
@@ -372,14 +389,8 @@ public class ScalarOperatorsReuse {
                 }
             }
 
-            if (scalarOperator instanceof CallOperator) {
-                String fnName = ((CallOperator) scalarOperator).getFnName();
-                if (FunctionSet.nonDeterministicFunctions.contains(fnName)) {
-                    return true;
-                }
-            }
             for (ScalarOperator child : scalarOperator.getChildren()) {
-                if (isNonDeterministicFuncOrLambdaDependent(child)) {
+                if (isLambdaDependent(child)) {
                     return true;
                 }
             }
@@ -427,7 +438,8 @@ public class ScalarOperatorsReuse {
             // Apply to normalize rule to eliminate invalid ColumnRef usage for in-predicate
             com.starrocks.sql.optimizer.rewrite.ScalarOperatorRewriter rewriter =
                     new com.starrocks.sql.optimizer.rewrite.ScalarOperatorRewriter();
-            List<ScalarOperatorRewriteRule> rules = Collections.singletonList(new NormalizePredicateRule());
+            List<ScalarOperatorRewriteRule> rules =
+                    ImmutableList.of(new NormalizePredicateRule(), new ReduceCastRule());
             for (Map.Entry<ColumnRefOperator, ScalarOperator> kv : columnRefMap.entrySet()) {
                 ScalarOperator rewriteOperator =
                         ScalarOperatorsReuse.rewriteOperatorWithCommonOperator(kv.getValue(), commonSubOperators);

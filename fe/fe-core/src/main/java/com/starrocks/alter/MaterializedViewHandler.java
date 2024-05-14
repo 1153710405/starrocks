@@ -769,7 +769,7 @@ public class MaterializedViewHandler extends AlterHandler {
     public void processDropMaterializedView(DropMaterializedViewStmt dropMaterializedViewStmt, Database db,
                                             OlapTable olapTable) throws DdlException, MetaNotFoundException {
         Locker locker = new Locker();
-        Preconditions.checkState(locker.isWriteLockHeldByCurrentThread(db));
+        Preconditions.checkState(locker.isDbWriteLockHeldByCurrentThread(db));
         try {
             String mvName = dropMaterializedViewStmt.getMvName();
             // Step1: check drop mv index operation
@@ -1048,6 +1048,10 @@ public class MaterializedViewHandler extends AlterHandler {
 
     @Override
     public void cancel(CancelStmt stmt) throws DdlException {
+        cancel(stmt, "user cancelled");
+    }
+
+    public void cancel(CancelStmt stmt, String reason) throws DdlException {
         CancelAlterTableStmt cancelAlterTableStmt = (CancelAlterTableStmt) stmt;
 
         String dbName = cancelAlterTableStmt.getDbName();
@@ -1099,7 +1103,7 @@ public class MaterializedViewHandler extends AlterHandler {
 
         // alter job v2's cancel must be called outside the database lock
         for (AlterJobV2 alterJobV2 : rollupJobV2List) {
-            alterJobV2.cancel("user cancelled");
+            alterJobV2.cancel(reason);
             if (alterJobV2.isDone()) {
                 onJobDone(alterJobV2);
             }

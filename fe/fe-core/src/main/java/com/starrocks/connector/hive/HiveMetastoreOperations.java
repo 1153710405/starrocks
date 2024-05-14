@@ -16,6 +16,7 @@
 package com.starrocks.connector.hive;
 
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.Database;
 import com.starrocks.catalog.HiveMetaStoreTable;
@@ -28,6 +29,7 @@ import com.starrocks.connector.ConnectorTableId;
 import com.starrocks.connector.MetastoreType;
 import com.starrocks.connector.PartitionUtil;
 import com.starrocks.connector.exception.StarRocksConnectorException;
+import com.starrocks.sql.ast.CreateTableLikeStmt;
 import com.starrocks.sql.ast.CreateTableStmt;
 import com.starrocks.sql.ast.ListPartitionDesc;
 import org.apache.hadoop.conf.Configuration;
@@ -147,7 +149,7 @@ public class HiveMetastoreOperations {
         return metastore.getAllTableNames(dbName);
     }
 
-    public boolean createTable(CreateTableStmt stmt) throws DdlException {
+    public boolean createTable(CreateTableStmt stmt, List<Column> partitionColumns) throws DdlException {
         String dbName = stmt.getDbName();
         String tableName = stmt.getTableName();
         Map<String, String> properties = stmt.getProperties() != null ? stmt.getProperties() : new HashMap<>();
@@ -155,9 +157,13 @@ public class HiveMetastoreOperations {
         Path tablePath = getDefaultLocation(dbName, tableName);
         HiveStorageFormat.check(properties);
 
-        List<String> partitionColNames = stmt.getPartitionDesc() != null ?
-                ((ListPartitionDesc) stmt.getPartitionDesc()).getPartitionColNames() :
-                new ArrayList<>();
+        List<String> partitionColNames;
+        if (partitionColumns.isEmpty()) {
+            partitionColNames = stmt.getPartitionDesc() != null ?
+                    ((ListPartitionDesc) stmt.getPartitionDesc()).getPartitionColNames() : new ArrayList<>();
+        } else {
+            partitionColNames = partitionColumns.stream().map(Column::getName).collect(Collectors.toList());
+        }
 
         HiveTable.Builder builder = HiveTable.builder()
                 .setId(ConnectorTableId.CONNECTOR_ID_GENERATOR.getNextId().asInt())
@@ -183,6 +189,11 @@ public class HiveMetastoreOperations {
             LOG.error("Failed to create table {}.{}", dbName, tableName);
             boolean shouldDelete;
             try {
+                if (tableExists(dbName, tableName)) {
+                    LOG.warn("Table {}.{} already exists. But some error occur such as accessing meta service timeout",
+                            dbName, table, e);
+                    return true;
+                }
                 FileSystem fileSystem = FileSystem.get(URI.create(tablePath.toString()), hadoopConf);
                 shouldDelete = !fileSystem.listLocatedStatus(tablePath).hasNext();
                 if (shouldDelete) {
@@ -195,6 +206,17 @@ public class HiveMetastoreOperations {
         }
 
         return true;
+    }
+
+    public boolean createTable(CreateTableStmt stmt) throws DdlException {
+        return createTable(stmt, ImmutableList.of());
+    }
+
+    public boolean createTableLike(CreateTableLikeStmt stmt) throws DdlException {
+        String existedDbName = stmt.getExistedDbName();
+        String existedTableName = stmt.getExistedTableName();
+        Table likeTable = getTable(existedDbName, existedTableName);
+        return createTable(stmt.getCreateTableStmt(), likeTable.getPartitionColumns());
     }
 
     public void dropTable(String dbName, String tableName) {

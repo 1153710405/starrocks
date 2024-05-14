@@ -28,6 +28,7 @@ import com.starrocks.common.Config;
 import com.starrocks.common.DdlException;
 import com.starrocks.common.FeConstants;
 import com.starrocks.common.Pair;
+import com.starrocks.common.util.concurrent.FairReentrantReadWriteLock;
 import com.starrocks.persist.RolePrivilegeCollectionInfo;
 import com.starrocks.persist.metablock.SRMetaBlockEOFException;
 import com.starrocks.persist.metablock.SRMetaBlockException;
@@ -57,14 +58,13 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.stream.Collectors;
 
 public class AuthorizationMgr {
     private static final Logger LOG = LogManager.getLogger(AuthorizationMgr.class);
@@ -78,7 +78,7 @@ public class AuthorizationMgr {
 
     protected AuthorizationProvider provider;
 
-    private GlobalStateMgr globalStateMgr;
+    protected GlobalStateMgr globalStateMgr;
 
     protected Map<UserIdentity, UserPrivilegeCollectionV2> userToPrivilegeCollection;
     protected Map<Long, RolePrivilegeCollectionV2> roleIdToPrivilegeCollection;
@@ -89,7 +89,8 @@ public class AuthorizationMgr {
             CacheBuilder.newBuilder()
                     .maximumSize(MAX_NUM_CACHED_MERGED_PRIVILEGE_COLLECTION)
                     .expireAfterAccess(CACHED_MERGED_PRIVILEGE_COLLECTION_EXPIRE_MIN, TimeUnit.MINUTES)
-                    .build(new CacheLoader<Pair<UserIdentity, Set<Long>>, PrivilegeCollectionV2>() {
+                    .build(new CacheLoader<>() {
+                        @NotNull
                         @Override
                         public PrivilegeCollectionV2 load(@NotNull Pair<UserIdentity, Set<Long>> userIdentitySetPair)
                                 throws Exception {
@@ -108,22 +109,18 @@ public class AuthorizationMgr {
         roleNameToId = new HashMap<>();
         userToPrivilegeCollection = new HashMap<>();
         roleIdToPrivilegeCollection = new HashMap<>();
-        userLock = new ReentrantReadWriteLock();
-        roleLock = new ReentrantReadWriteLock();
+        userLock = new FairReentrantReadWriteLock();
+        roleLock = new FairReentrantReadWriteLock();
     }
 
     public AuthorizationMgr(GlobalStateMgr globalStateMgr, AuthorizationProvider provider) {
         this.globalStateMgr = globalStateMgr;
-        if (provider == null) {
-            this.provider = new DefaultAuthorizationProvider();
-        } else {
-            this.provider = provider;
-        }
+        this.provider = provider;
         pluginId = this.provider.getPluginId();
         pluginVersion = this.provider.getPluginVersion();
         roleNameToId = new HashMap<>();
-        userLock = new ReentrantReadWriteLock();
-        roleLock = new ReentrantReadWriteLock();
+        userLock = new FairReentrantReadWriteLock();
+        roleLock = new FairReentrantReadWriteLock();
         userToPrivilegeCollection = new HashMap<>();
         roleIdToPrivilegeCollection = new HashMap<>();
         initBuiltinRolesAndUsers();
@@ -139,7 +136,20 @@ public class AuthorizationMgr {
                             PrivilegeBuiltinConstants.ROOT_ROLE_NAME,
                             "built-in root role which has all privileges on all objects");
             // GRANT ALL ON ALL
-            for (ObjectType objectType : provider.getAllPrivObjectTypes()) {
+            List<ObjectType> objectTypes = Lists.newArrayList(ObjectType.TABLE,
+                    ObjectType.DATABASE,
+                    ObjectType.SYSTEM,
+                    ObjectType.USER,
+                    ObjectType.RESOURCE,
+                    ObjectType.VIEW,
+                    ObjectType.CATALOG,
+                    ObjectType.MATERIALIZED_VIEW,
+                    ObjectType.FUNCTION,
+                    ObjectType.RESOURCE_GROUP,
+                    ObjectType.PIPE,
+                    ObjectType.GLOBAL_FUNCTION,
+                    ObjectType.STORAGE_VOLUME);
+            for (ObjectType objectType : objectTypes) {
                 initPrivilegeCollectionAllObjects(rolePrivilegeCollection, objectType,
                         provider.getAvailablePrivType(objectType));
             }
@@ -148,11 +158,20 @@ public class AuthorizationMgr {
             // 2. builtin db_admin role
             rolePrivilegeCollection = initBuiltinRoleUnlocked(PrivilegeBuiltinConstants.DB_ADMIN_ROLE_ID,
                     PrivilegeBuiltinConstants.DB_ADMIN_ROLE_NAME, "built-in database administration role");
-            // ALL system but GRANT AND NODE
-            List<PrivilegeType> actionWithoutNodeGrant = provider.getAvailablePrivType(ObjectType.SYSTEM).stream().filter(
-                    x -> !x.equals(PrivilegeType.GRANT) && !x.equals(PrivilegeType.NODE)).collect(Collectors.toList());
-            initPrivilegeCollections(rolePrivilegeCollection, ObjectType.SYSTEM, actionWithoutNodeGrant, null,
-                    false);
+            // System grant belong to db_admin
+            List<PrivilegeType> dbAdminSystemGrant = Lists.newArrayList(
+                    PrivilegeType.CREATE_RESOURCE,
+                    PrivilegeType.PLUGIN,
+                    PrivilegeType.FILE,
+                    PrivilegeType.BLACKLIST,
+                    PrivilegeType.OPERATE,
+                    PrivilegeType.CREATE_EXTERNAL_CATALOG,
+                    PrivilegeType.REPOSITORY,
+                    PrivilegeType.CREATE_RESOURCE_GROUP,
+                    PrivilegeType.CREATE_GLOBAL_FUNCTION,
+                    PrivilegeType.CREATE_STORAGE_VOLUME);
+            initPrivilegeCollections(rolePrivilegeCollection, ObjectType.SYSTEM, dbAdminSystemGrant, null, false);
+
             for (ObjectType t : Arrays.asList(
                     ObjectType.CATALOG,
                     ObjectType.DATABASE,
@@ -176,10 +195,10 @@ public class AuthorizationMgr {
             initPrivilegeCollections(
                     rolePrivilegeCollection,
                     ObjectType.SYSTEM,
-                    Collections.singletonList(PrivilegeType.NODE),
+                    List.of(PrivilegeType.NODE),
                     null,
                     false);
-            rolePrivilegeCollection.disableMutable(); // not mutable
+            rolePrivilegeCollection.disableMutable();
 
             // 4. user_admin
             rolePrivilegeCollection = initBuiltinRoleUnlocked(PrivilegeBuiltinConstants.USER_ADMIN_ROLE_ID,
@@ -191,8 +210,8 @@ public class AuthorizationMgr {
                     Collections.singletonList(PrivilegeType.GRANT),
                     null,
                     false);
-            ObjectType t = ObjectType.USER;
-            initPrivilegeCollectionAllObjects(rolePrivilegeCollection, t, provider.getAvailablePrivType(t));
+            initPrivilegeCollectionAllObjects(rolePrivilegeCollection, ObjectType.USER,
+                    provider.getAvailablePrivType(ObjectType.USER));
             rolePrivilegeCollection.disableMutable(); // not mutable
 
             // 5. public
@@ -230,7 +249,7 @@ public class AuthorizationMgr {
     }
 
     // called by initBuiltinRolesAndUsers()
-    private void initPrivilegeCollectionAllObjects(
+    protected void initPrivilegeCollectionAllObjects(
             PrivilegeCollectionV2 collection, ObjectType objectType, List<PrivilegeType> actionList)
             throws PrivilegeException {
         List<PEntryObject> objects = new ArrayList<>();
@@ -486,7 +505,7 @@ public class AuthorizationMgr {
                     userPrivilegeCollection.grantRole(roleId);
                     boolean verifyDone = false;
                     try {
-                        Set<Long> result = getAllPredecessorsUnlocked(userPrivilegeCollection);
+                        Set<Long> result = getAllPredecessorRoleIdsUnlocked(userPrivilegeCollection);
                         if (result.size() > Config.privilege_max_total_roles_per_user) {
                             LOG.warn("too many predecessor roles {} for user {}", result, user);
                             throw new PrivilegeException(String.format(
@@ -533,7 +552,7 @@ public class AuthorizationMgr {
                         getRolePrivilegeCollectionUnlocked(parentRoleId, true);
 
                 // to avoid circle, verify roleName is not predecessor role of parentRoleName
-                Set<Long> parentRolePredecessors = getAllPredecessorsUnlocked(parentRoleId);
+                Set<Long> parentRolePredecessors = getAllPredecessorRoleIdsUnlocked(parentRoleId);
                 if (parentRolePredecessors.contains(roleId)) {
                     throw new PrivilegeException(String.format("role %s[%d] is already a predecessor role of %s[%d]",
                             roleName, roleId, parentRole, parentRoleId));
@@ -544,7 +563,7 @@ public class AuthorizationMgr {
                 parentCollection.addSubRole(roleId);
                 try {
                     // verify role inheritance depth
-                    parentRolePredecessors = getAllPredecessorsUnlocked(parentRoleId);
+                    parentRolePredecessors = getAllPredecessorRoleIdsUnlocked(parentRoleId);
                     parentRolePredecessors.add(parentRoleId);
                     for (long i : parentRolePredecessors) {
                         long cnt = getMaxRoleInheritanceDepthInner(0, i);
@@ -848,7 +867,7 @@ public class AuthorizationMgr {
                 // (because the current session and the session initiated by the revoke operation may not be the same),
                 // but for the user The operation will cause the cache to invalid, so in the next load process after
                 // the cache fails, we need to determine whether the user still has access to this role.
-                validRoleIds = getAllPredecessorsUnlocked(validRoleIds);
+                validRoleIds = getAllPredecessorRoleIdsUnlocked(validRoleIds);
 
                 // 3. Merge privilege collections of all predecessors.
                 for (long roleId : validRoleIds) {
@@ -953,9 +972,7 @@ public class AuthorizationMgr {
     public Set<UserIdentity> getAllUserIdentities() {
         userReadLock();
         try {
-            List<String> users = Lists.newArrayList();
-            Set<UserIdentity> userIdentities = userToPrivilegeCollection.keySet();
-            return userIdentities;
+            return userToPrivilegeCollection.keySet();
         } finally {
             userReadUnlock();
         }
@@ -1136,6 +1153,14 @@ public class AuthorizationMgr {
 
     public boolean isAvailablePrivType(ObjectType objectType, PrivilegeType privilegeType) {
         return provider.isAvailablePrivType(objectType, privilegeType);
+    }
+
+    public PrivilegeType getPrivilegeType(String privTypeString) {
+        return provider.getPrivilegeType(privTypeString);
+    }
+
+    public ObjectType getObjectType(String objectTypeUnResolved) {
+        return provider.getObjectType(objectTypeUnResolved);
     }
 
     public List<PrivilegeType> getAvailablePrivType(ObjectType objectType) {
@@ -1415,6 +1440,32 @@ public class AuthorizationMgr {
         }
     }
 
+    public List<String> getRoleNamesByRoleIds(Set<Long> roleIds) {
+        List<String> roleNames = new ArrayList<>();
+        if (roleIds != null) {
+            for (Long roleId : roleIds) {
+                RolePrivilegeCollectionV2 roleCollection = getRolePrivilegeCollection(roleId);
+                if (roleCollection != null) {
+                    roleNames.add(roleCollection.getName());
+                }
+            }
+        }
+
+        return roleNames;
+    }
+
+    public List<String> getInactivatedRoleNamesByUser(UserIdentity userIdentity, List<String> activatedRoleNames) {
+        List<String> inactivatedRoleNames = new ArrayList<>();
+        try {
+            inactivatedRoleNames = getRoleNamesByUser(userIdentity);
+        } catch (PrivilegeException e) {
+            // ignore exception
+        }
+        inactivatedRoleNames.removeAll(activatedRoleNames);
+
+        return inactivatedRoleNames;
+    }
+
     // used in executing `set role` statement
     public Long getRoleIdByNameAllowNull(String name) {
         roleReadLock();
@@ -1453,7 +1504,7 @@ public class AuthorizationMgr {
      * remove invalid object periodically
      * <p>
      * lock order should always be:
-     * AuthenticationManager.lock -> AuthorizationManager.userLock -> AuthorizationManager.roleLock
+     * `AuthenticationManager.lock` -> `AuthorizationManager.userLock` -> `AuthorizationManager.roleLock`
      */
     public void removeInvalidObject() {
         userWriteLock();
@@ -1568,25 +1619,25 @@ public class AuthorizationMgr {
      * then the inheritance graph would be role_a -> role_b -> role_c
      * then all parent roles of role_c would be [role_a, role_b]
      */
-    protected Set<Long> getAllPredecessorsUnlocked(UserPrivilegeCollectionV2 collection) throws PrivilegeException {
-        return getAllPredecessorsUnlocked(collection.getAllRoles());
+    protected Set<Long> getAllPredecessorRoleIdsUnlocked(UserPrivilegeCollectionV2 collection) throws PrivilegeException {
+        return getAllPredecessorRoleIdsUnlocked(collection.getAllRoles());
     }
 
-    protected Set<Long> getAllPredecessorsUnlocked(long roleId) throws PrivilegeException {
+    protected Set<Long> getAllPredecessorRoleIdsUnlocked(long roleId) throws PrivilegeException {
         Set<Long> set = new HashSet<>();
         set.add(roleId);
-        return getAllPredecessorsUnlocked(set);
+        return getAllPredecessorRoleIdsUnlocked(set);
     }
 
-    protected Set<Long> getAllPredecessorsUnlocked(Set<Long> initialRoleIds) throws PrivilegeException {
+    protected Set<Long> getAllPredecessorRoleIdsUnlocked(Set<Long> initialRoleIds) throws PrivilegeException {
         Set<Long> result = new HashSet<>(initialRoleIds);
         for (long roleId : initialRoleIds) {
-            getAllPredecessorsInner(roleId, result);
+            getAllPredecessorRoleIdsInner(roleId, result);
         }
         return result;
     }
 
-    protected void getAllPredecessorsInner(long roleId, Set<Long> resultSet) throws PrivilegeException {
+    protected void getAllPredecessorRoleIdsInner(long roleId, Set<Long> resultSet) throws PrivilegeException {
         RolePrivilegeCollectionV2 collection = getRolePrivilegeCollectionUnlocked(roleId, false);
         if (collection == null) { // this role has been dropped
             resultSet.remove(roleId);
@@ -1596,9 +1647,31 @@ public class AuthorizationMgr {
             if (!resultSet.contains(parentId)) {
                 resultSet.add(parentId);
                 // recursively collect all predecessors
-                getAllPredecessorsInner(parentId, resultSet);
+                getAllPredecessorRoleIdsInner(parentId, resultSet);
             }
         }
+    }
+
+    public Set<String> getAllPredecessorRoleNames(Long roleId) {
+        Set<Long> resultSetIds = new HashSet<>();
+        resultSetIds.add(roleId);
+
+        roleReadLock();
+        try {
+            getAllPredecessorRoleIdsInner(roleId, resultSetIds);
+        } catch (PrivilegeException e) {
+            // can ignore
+        } finally {
+            roleReadUnlock();
+        }
+
+        return new HashSet<>(getRoleNamesByRoleIds(resultSetIds));
+    }
+
+    public Set<String> getAllPredecessorRoleNamesByUser(UserIdentity userIdentity) throws PrivilegeException {
+        Set<String> resultSet = new HashSet<>();
+        getRoleIdsByUser(userIdentity).forEach(roleId -> resultSet.addAll(getAllPredecessorRoleNames(roleId)));
+        return resultSet;
     }
 
     public boolean isLoaded() {
@@ -1620,11 +1693,7 @@ public class AuthorizationMgr {
             // 1 json for myself
             AuthorizationMgr ret = reader.readJson(AuthorizationMgr.class);
             ret.globalStateMgr = globalStateMgr;
-            if (provider == null) {
-                ret.provider = new DefaultAuthorizationProvider();
-            } else {
-                ret.provider = provider;
-            }
+            ret.provider = Objects.requireNonNullElseGet(provider, DefaultAuthorizationProvider::new);
             ret.initBuiltinRolesAndUsers();
 
             // 1 json for num user
@@ -1664,7 +1733,6 @@ public class AuthorizationMgr {
                 ret.roleIdToPrivilegeCollection.put(roleId, collection);
             }
 
-            assert ret != null; // can't be NULL
             LOG.info("loaded {} users, {} roles",
                     ret.userToPrivilegeCollection.size(), ret.roleIdToPrivilegeCollection.size());
 
@@ -1695,19 +1763,13 @@ public class AuthorizationMgr {
             writer.writeJson(this);
             // 1 json for num user
             writer.writeJson(userToPrivilegeCollection.size());
-            Iterator<Map.Entry<UserIdentity, UserPrivilegeCollectionV2>> iterator =
-                    userToPrivilegeCollection.entrySet().iterator();
-            while (iterator.hasNext()) {
-                Map.Entry<UserIdentity, UserPrivilegeCollectionV2> entry = iterator.next();
+            for (Map.Entry<UserIdentity, UserPrivilegeCollectionV2> entry : userToPrivilegeCollection.entrySet()) {
                 writer.writeJson(entry.getKey());
                 writer.writeJson(entry.getValue());
             }
             // 1 json for num roles
             writer.writeJson(roleIdToPrivilegeCollection.size());
-            Iterator<Map.Entry<Long, RolePrivilegeCollectionV2>> roleIter =
-                    roleIdToPrivilegeCollection.entrySet().iterator();
-            while (roleIter.hasNext()) {
-                Map.Entry<Long, RolePrivilegeCollectionV2> entry = roleIter.next();
+            for (Map.Entry<Long, RolePrivilegeCollectionV2> entry : roleIdToPrivilegeCollection.entrySet()) {
                 RolePrivilegeCollectionV2 value = entry.getValue();
                 // Avoid newly added PEntryObject type corrupt forward compatibility,
                 // since built-in roles are always initialized on startup, we don't need to persist them.

@@ -30,10 +30,12 @@ CREATE TABLE user_access (
     last_access datetime,
     credits double
 )
-DUPLICATE KEY(uid, name);
+ORDER BY (uid, name);
 ```
 
 The above CREATE TABLE example creates a Duplicate Key table. No constraint is added to columns in this type of table, so duplicate data rows can exist in the table. The first two columns of the Duplicate Key table are specified as sort columns to form the sort key. Data is stored after being sorted based on the sort key, which can accelerate indexing during queries.
+
+Since v3.3.0, the Duplicate Key table supports specifying the sort key using `ORDER BY`. If both `ORDER BY` and `DUPLICATE KEY` are used, `DUPLICATE KEY` does not take effect.
 
 <Replicanum />
 
@@ -70,14 +72,15 @@ Create Table: CREATE TABLE `user_access` (
 ) ENGINE=OLAP 
 DUPLICATE KEY(`uid`, `name`)
 DISTRIBUTED BY RANDOM
+ORDER BY(`uid`, `name`)
 PROPERTIES (
-"replication_num" = "3",
-"in_memory" = "false",
-"enable_persistent_index" = "false",
+"bucket_size" = "4294967296",
+"compression" = "LZ4",
+"fast_schema_evolution" = "true",
 "replicated_storage" = "true",
-"compression" = "LZ4"
+"replication_num" = "3"
 );
-1 row in set (0.00 sec)
+1 row in set (0.01 sec)
 ```
 
 ## Understand comprehensive table structure
@@ -114,7 +117,7 @@ StarRocks provides two bucketing methods:
 - Hash bucketing: Data is distributed into buckets based on the hash values of the bucketing key. You can select columns frequently used as condition columns in queries as bucketing columns, which helps improve query efficiency.
 - Random bucketing: Data is randomly distributed to buckets. This bucketing method is more simple and ease to use.
 
-### [Data types](../sql-reference/sql-statements/data-types/data-type-list.md)
+### [Data types](../sql-reference/data-types/data-type-list.md)
 
 In addition to basic data types such as NUMERIC, DATE, and STRING, StarRocks supports complex semi-structured data types, including ARRAY, JSON, MAP, and STRUCT.
 
@@ -124,11 +127,10 @@ An index is a special data structure and is used as a pointer to data in a table
 
 StarRocks provides built-in indexes: Prefix indexes, Ordinal indexes, and ZoneMap indexes. StarRocks also allows users to create indexes, that is, Bitmap indexes and Bloom Filter indexes, to further enhance query efficiency.
 
-
 ### Constraints
 
 Constraints help ensure data integrity, consistency, and accuracy. The primary key columns in Primary Key tables must have unique and NOT NULL values. The aggregate key columns in Aggregate tables and the unique key columns in Unique Key tables must have unique values.
 
 ### More features
 
-Apart from the above features, you can adopt more features based on your business requirements to design a more robust table structure. For example, using Bitmap and HLL columns to accelerate distinct counting, specifying generated columns or auto-increment columns to speed up some queries, configuring flexible and automatic storage cooldown methods to reduce maintainance costs, and configuring Colocate Join to speed up multi-table JOIN queries. For more details, see [CREATE TABLE](../sql-reference/sql-statements/data-definition/CREATE_TABLE.md).
+Apart from the above features, you can adopt more features based on your business requirements to design a more robust table structure. For example, using Bitmap and HLL columns to accelerate distinct counting, specifying generated columns or auto-increment columns to speed up some queries, configuring flexible and automatic storage cooldown methods to reduce maintenance costs, and configuring Colocate Join to speed up multi-table JOIN queries. For more details, see [CREATE TABLE](../sql-reference/sql-statements/data-definition/CREATE_TABLE.md).

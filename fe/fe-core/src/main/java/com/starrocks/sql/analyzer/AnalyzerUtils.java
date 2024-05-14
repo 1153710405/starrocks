@@ -281,7 +281,7 @@ public class AnalyzerUtils {
         return null;
     }
 
-    private static class DBCollector extends AstVisitor<Void, Void> {
+    private static class DBCollector implements AstVisitor<Void, Void> {
         private final Map<String, Database> dbs;
         private final ConnectContext session;
 
@@ -339,7 +339,7 @@ public class AnalyzerUtils {
         @Override
         public Void visitSetOp(SetOperationRelation node, Void context) {
             if (node.hasWithClause()) {
-                node.getRelations().forEach(this::visit);
+                node.getCteRelations().forEach(this::visit);
             }
             node.getRelations().forEach(this::visit);
             return null;
@@ -711,6 +711,12 @@ public class AnalyzerUtils {
         Map<TableName, Table> nonOlapTables = Maps.newHashMap();
         new AnalyzerUtils.NonOlapTableCollector(nonOlapTables).visit(statementBase);
         return nonOlapTables.isEmpty();
+    }
+
+    public static boolean hasTemporaryTables(StatementBase statementBase) {
+        Map<TableName, Table> tables = new HashMap<>();
+        new AnalyzerUtils.TableCollector(tables).visit(statementBase);
+        return tables.values().stream().anyMatch(t -> t.isTemporaryTable());
     }
 
     public static void copyOlapTable(StatementBase statementBase, Set<OlapTable> olapTables) {

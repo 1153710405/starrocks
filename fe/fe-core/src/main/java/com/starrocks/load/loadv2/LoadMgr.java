@@ -51,6 +51,7 @@ import com.starrocks.common.UserException;
 import com.starrocks.common.io.Writable;
 import com.starrocks.common.util.LogBuilder;
 import com.starrocks.common.util.LogKey;
+import com.starrocks.common.util.concurrent.FairReentrantReadWriteLock;
 import com.starrocks.load.EtlJobType;
 import com.starrocks.load.FailMsg;
 import com.starrocks.load.FailMsg.CancelType;
@@ -63,6 +64,7 @@ import com.starrocks.persist.metablock.SRMetaBlockID;
 import com.starrocks.persist.metablock.SRMetaBlockReader;
 import com.starrocks.persist.metablock.SRMetaBlockWriter;
 import com.starrocks.qe.ConnectContext;
+import com.starrocks.qe.scheduler.Coordinator;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.sql.ast.AlterLoadStmt;
 import com.starrocks.sql.ast.CancelLoadStmt;
@@ -111,7 +113,7 @@ public class LoadMgr implements Writable, MemoryTrackable {
     private final Map<Long, Map<String, List<LoadJob>>> dbIdToLabelToLoadJobs = Maps.newConcurrentMap();
     private final LoadJobScheduler loadJobScheduler;
 
-    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final ReentrantReadWriteLock lock = new FairReentrantReadWriteLock();
 
     public LoadMgr(LoadJobScheduler loadJobScheduler) {
         this.loadJobScheduler = loadJobScheduler;
@@ -126,7 +128,9 @@ public class LoadMgr implements Writable, MemoryTrackable {
     public void createLoadJobFromStmt(LoadStmt stmt, ConnectContext context) throws DdlException {
         Database database = checkDb(stmt.getLabel().getDbName());
         long dbId = database.getId();
-        LoadJob loadJob = null;
+        // LoadJob must be created outside LoadMgr's lock because the database lock will be held in fromLoadStmt().
+        // In other functions, such as LeaderImpl.finishRealtimePush, the locking sequence is: db Lock => LoadMgr Lock.
+        LoadJob loadJob = BulkLoadJob.fromLoadStmt(stmt, context);
         writeLock();
         try {
             checkLabelUsed(dbId, stmt.getLabel().getLabelName());
@@ -138,7 +142,6 @@ public class LoadMgr implements Writable, MemoryTrackable {
                         "There are more than " + Config.desired_max_waiting_jobs + " load jobs in waiting queue, "
                                 + "please retry later.");
             }
-            loadJob = BulkLoadJob.fromLoadStmt(stmt, context);
             createLoadJob(loadJob);
         } finally {
             writeUnlock();
@@ -230,7 +233,9 @@ public class LoadMgr implements Writable, MemoryTrackable {
     }
 
     public long registerLoadJob(String label, String dbName, long tableId, EtlJobType jobType,
-                                long createTimestamp, long estimateScanRows, TLoadJobType type, long timeout)
+                                long createTimestamp, long estimateScanRows,
+                                int estimateFileNum, long estimateFileSize,
+                                TLoadJobType type, long timeout, Coordinator coordinator)
             throws UserException {
 
         // get db id
@@ -239,10 +244,11 @@ public class LoadMgr implements Writable, MemoryTrackable {
             throw new MetaNotFoundException("Database[" + dbName + "] does not exist");
         }
 
-        LoadJob loadJob;
+        InsertLoadJob loadJob;
         if (Objects.requireNonNull(jobType) == EtlJobType.INSERT) {
-            loadJob =
-                    new InsertLoadJob(label, db.getId(), tableId, createTimestamp, estimateScanRows, type, timeout);
+            loadJob = new InsertLoadJob(label, db.getId(), tableId, createTimestamp, type, timeout, coordinator);
+            loadJob.setLoadFileInfo(estimateFileNum, estimateFileSize);
+            loadJob.setEstimateScanRow(estimateScanRows);
         } else {
             throw new LoadException("Unknown job type [" + jobType.name() + "]");
         }
@@ -564,13 +570,13 @@ public class LoadMgr implements Writable, MemoryTrackable {
     }
 
     public List<LoadJob> getLoadJobsByDb(long dbId, String labelValue, boolean accurateMatch) {
-
         List<LoadJob> loadJobList = Lists.newArrayList();
-        if (dbId != -1 && !dbIdToLabelToLoadJobs.containsKey(dbId)) {
-            return loadJobList;
-        }
         readLock();
         try {
+            if (dbId != -1 && !dbIdToLabelToLoadJobs.containsKey(dbId)) {
+                return loadJobList;
+            }
+
             for (Map<String, List<LoadJob>> dbJobs : dbIdToLabelToLoadJobs.values()) {
                 Map<String, List<LoadJob>> labelToLoadJobs = dbId == -1 ? dbJobs : dbIdToLabelToLoadJobs.get(dbId);
 

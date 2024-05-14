@@ -91,7 +91,7 @@ public class HudiMetadata implements ConnectorMetadata {
     }
 
     @Override
-    public List<String> listPartitionNames(String dbName, String tblName) {
+    public List<String> listPartitionNames(String dbName, String tblName, long snapshotId) {
         return hmsOps.getPartitionKeys(dbName, tblName);
     }
 
@@ -211,8 +211,10 @@ public class HudiMetadata implements ConnectorMetadata {
         if (isResourceMappingCatalog(catalogName)) {
             HiveMetaStoreTable hmsTable = (HiveMetaStoreTable) GlobalStateMgr.getCurrentState()
                     .getMetadata().getTable(dbName, tableName);
-            cacheUpdateProcessor.ifPresent(processor -> processor.invalidateTable(
-                    hmsTable.getDbName(), hmsTable.getTableName(), hmsTable.getTableLocation()));
+            if (hmsTable != null) {
+                cacheUpdateProcessor.ifPresent(processor -> processor.invalidateTable(
+                        hmsTable.getDbName(), hmsTable.getTableName(), hmsTable.getTableLocation()));
+            }
         }
     }
 

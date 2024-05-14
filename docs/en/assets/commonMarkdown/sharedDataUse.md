@@ -86,7 +86,7 @@ The `Type` of a table in shared-data StarRocks cluster is `CLOUD_NATIVE`. In the
 
 ### Load data into a shared-data StarRocks cluster
 
-Shared-data StarRocks clusters support all loading methods provided by StarRocks. See [Overview of data loading](../../loading/Loading_intro.md) for more information.
+Shared-data StarRocks clusters support all loading methods provided by StarRocks. See [Loading options](../../loading/loading_introduction/Loading_intro.md) for more information.
 
 ### Query in a shared-data StarRocks cluster
 
@@ -94,4 +94,4 @@ Tables in a shared-data StarRocks cluster support all types of queries provided 
 
 > **NOTE**
 >
-> Shared-data StarRocks clusters do not support [synchronous materialized views](../../using_starrocks/Materialized_view-single_table.md).
+> Shared-data StarRocks clusters support [synchronous materialized views](../../using_starrocks/Materialized_view-single_table.md) from v3.3.0 onwards.

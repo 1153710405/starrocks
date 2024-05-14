@@ -241,7 +241,9 @@ build_llvm() {
         "LLVMBinaryFormat"
         "LLVMDebugInfoDWARF"
         "LLVMObjCARCOpts"
+        "LLVMPasses"
         "LLVMCodeGen"
+        "LLVMFrontendOpenMP"
         "LLVMMCDisassembler"
         "LLVMSupport"
         "LLVMJITLink"
@@ -257,10 +259,14 @@ build_llvm() {
         "LLVMAnalysis"
         "LLVMGlobalISel"
         "LLVMScalarOpts"
+        "LLVMLinker"
+        "LLVMCoroutines"
         "LLVMTargetParser"
         "LLVMDemangle"
         "LLVMRemarks"
         "LLVMDebugInfoCodeView"
+        "LLVMAggressiveInstCombine"
+        "LLVMIRPrinter"
         "LLVMOrcShared"
         "LLVMOrcJIT"
         "LLVMTextAPI"
@@ -270,11 +276,12 @@ build_llvm() {
         "LLVMTransformUtils"
         "LLVMSelectionDAG"
         "LLVMMCParser"
+        "LLVMSupport"
     )
     if [ "${LLVM_TARGET}" == "X86" ]; then
-        LLVM_TARGETS_TO_BUILD+=("LLVMX86Info" "LLVMX86Desc" "LLVMX86CodeGen")
+        LLVM_TARGETS_TO_BUILD+=("LLVMX86Info" "LLVMX86Desc" "LLVMX86CodeGen" "LLVMX86AsmParser" "LLVMX86Disassembler")
     elif [ "${LLVM_TARGET}" == "AArch64" ]; then
-        LLVM_TARGETS_TO_BUILD+=("LLVMAArch64Info" "LLVMAArch64Desc" "LLVMAArch64CodeGen")
+        LLVM_TARGETS_TO_BUILD+=("LLVMAArch64Info" "LLVMAArch64Desc" "LLVMAArch64CodeGen" "LLVMAArch64Utils" "LLVMAArch64AsmParser" "LLVMAArch64Disassembler")
     fi
 
     LLVM_TARGETS_TO_INSTALL=()
@@ -747,7 +754,7 @@ build_bitshuffle() {
     arches="default avx2 avx512"
     # Becuase aarch64 don't support avx2, disable it.
     if [[ "${MACHINE_TYPE}" == "aarch64" ]]; then
-        arches="default"
+        arches="default neon"
     fi
 
     to_link=""
@@ -757,6 +764,8 @@ build_bitshuffle() {
             arch_flag="-mavx2"
         elif [ "$arch" == "avx512" ]; then
             arch_flag="-march=icelake-server"
+        elif [ "$arch" == "neon" ]; then
+            arch_flag="-march=armv8-a+crc"
         fi
         tmp_obj=bitshuffle_${arch}_tmp.o
         dst_obj=bitshuffle_${arch}.o
@@ -767,13 +776,7 @@ build_bitshuffle() {
         # Merge the object files together to produce a combined .o file.
         ld -r -o $tmp_obj bitshuffle_core.o bitshuffle.o iochain.o
         # For the AVX2 symbols, suffix them.
-        if [ "$arch" == "avx2" ]; then
-            # Create a mapping file with '<old_sym> <suffixed_sym>' on each line.
-            nm --defined-only --extern-only $tmp_obj | while read addr type sym ; do
-              echo ${sym} ${sym}_${arch}
-            done > renames.txt
-            objcopy --redefine-syms=renames.txt $tmp_obj $dst_obj
-        elif [ "$arch" == "avx512" ]; then
+        if [[ "$arch" == "avx2" || "$arch" == "avx512" || "$arch" == "neon" ]]; then
             # Create a mapping file with '<old_sym> <suffixed_sym>' on each line.
             nm --defined-only --extern-only $tmp_obj | while read addr type sym ; do
               echo ${sym} ${sym}_${arch}
@@ -1084,11 +1087,6 @@ build_fast_float() {
     cp -r $TP_SOURCE_DIR/$FAST_FLOAT_SOURCE/include $TP_INSTALL_DIR
 }
 
-build_cachelib() {
-    check_if_source_exist $CACHELIB_SOURCE
-    rm -rf $TP_INSTALL_DIR/$CACHELIB_SOURCE && mv $TP_SOURCE_DIR/$CACHELIB_SOURCE $TP_INSTALL_DIR/
-}
-
 build_starcache() {
     check_if_source_exist $STARCACHE_SOURCE
     rm -rf $TP_INSTALL_DIR/$STARCACHE_SOURCE && mv $TP_SOURCE_DIR/$STARCACHE_SOURCE $TP_INSTALL_DIR/
@@ -1257,8 +1255,8 @@ strip_binary() {
 # set GLOBAL_C*FLAGS for easy restore in each sub build process
 export GLOBAL_CPPFLAGS="-I ${TP_INCLUDE_DIR}"
 # https://stackoverflow.com/questions/42597685/storage-size-of-timespec-isnt-known
-export GLOBAL_CFLAGS="-O3 -fno-omit-frame-pointer -std=c99 -fPIC -g -D_POSIX_C_SOURCE=200112L"
-export GLOBAL_CXXFLAGS="-O3 -fno-omit-frame-pointer -Wno-class-memaccess -fPIC -g"
+export GLOBAL_CFLAGS="-O3 -fno-omit-frame-pointer -std=c99 -fPIC -g -D_POSIX_C_SOURCE=200112L -gz=zlib"
+export GLOBAL_CXXFLAGS="-O3 -fno-omit-frame-pointer -Wno-class-memaccess -fPIC -g -gz=zlib"
 
 # set those GLOBAL_*FLAGS to the CFLAGS/CXXFLAGS/CPPFLAGS
 export CPPFLAGS=$GLOBAL_CPPFLAGS
@@ -1315,7 +1313,6 @@ build_vpack
 build_opentelemetry
 build_benchmark
 build_fast_float
-build_cachelib
 build_starcache
 build_streamvbyte
 build_jansson

@@ -182,6 +182,10 @@ DISTRIBUTED BY HASH(`id`)
 
 示例基于 Spark 3.2.4，使用 `spark-shell`，`pyspark` 和 `spark-sql` 进行演示，运行前请将 connector jar放置在 `$SPARK_HOME/jars` 目录下。
 
+#### 网络配置
+
+确保 Spark 所在机器能够访问 StarRocks 集群中 FE 节点的 [`http_port`](../administration/management/FE_configuration.md#http_port)（默认 `8030`） 和 [`query_port`](../administration/management/FE_configuration.md#query_port) 端口（默认 `9030`），以及 BE 节点的 [`be_http_port`](../administration/management/BE_configuration.md#be_http_port) 端口（默认 `8040`）。
+
 ### 使用 Spark DataFrame 写入数据
 
 下面分别介绍在 Batch 和 Structured Streaming 下如何写入数据。
@@ -619,7 +623,7 @@ DISTRIBUTED BY HASH(`id`);
 
 2. 在 Spark SQL 客户端中创建一个表。
 
-   Spark 表 schema 是从 StarRocks 表中推断出来的，而 Spark 不支持 HLL 类型。因此，您需要在 Spark 中自定义相应列的数据类型，例如配置选项 `"starrocks.column.types"="visit_users BIGINT"`，将其配置为 BIGINT 类型。在使用 Stream Load 来导入数据时，Spark connector 使用 [hll_hash](../sql-reference/sql-functions/aggregate-functions/hll_hash.md) 函数将 BIGINT 类型的数据转换为 HLL 类型。
+   Spark 表 schema 是从 StarRocks 表中推断出来的，而 Spark 不支持 HLL 类型。因此，您需要在 Spark 中自定义相应列的数据类型，例如配置选项 `"starrocks.column.types"="visit_users BIGINT"`，将其配置为 BIGINT 类型。在使用 Stream Load 来导入数据时，Spark connector 使用 [hll_hash](../sql-reference/sql-functions/scalar-functions/hll_hash.md) 函数将 BIGINT 类型的数据转换为 HLL 类型。
 
    在 `spark-sql` 中运行如下 DDL 语句：
 
